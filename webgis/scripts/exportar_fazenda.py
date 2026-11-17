@@ -5,11 +5,25 @@ Só LÊ o banco (abre em modo read-only). Não altera nada no Pasto Legal.
 Uso:
     python exportar_fazenda.py CAMINHO/agno.db                    # lista as sessões com fazenda
     python exportar_fazenda.py CAMINHO/agno.db 0 saida.geojson    # exporta a sessão [0]
+
+Opções (no fim):
+    --so-fazenda        exporta só o contorno da fazenda, sem os piquetes
+    --nome "Fazenda X"  nome exibido no topo do mapa
 """
 import json
 import sqlite3
 import sys
 from pathlib import Path
+
+args = [a for a in sys.argv[1:]]
+so_fazenda = "--so-fazenda" in args
+nome = None
+if "--nome" in args:
+    i = args.index("--nome")
+    nome = args[i + 1]
+    del args[i : i + 2]
+args = [a for a in args if a != "--so-fazenda"]
+sys.argv = [sys.argv[0], *args]
 
 if len(sys.argv) < 2:
     sys.exit(__doc__)
@@ -38,6 +52,8 @@ if len(sys.argv) < 3:
     sys.exit(0)
 
 _, _, feats = sessoes[int(sys.argv[2])]
+if so_fazenda:
+    feats = [f for f in feats if f["feature_type"] == "rural_property"]
 colecao = {
     "type": "FeatureCollection",
     "features": [
@@ -49,6 +65,7 @@ colecao = {
                 "feature_type": f["feature_type"],
                 "total_area": f.get("total_area"),
                 "region": f.get("region"),
+                **({"name": nome} if nome and f["feature_type"] == "rural_property" else {}),
             },
         }
         for f in feats
