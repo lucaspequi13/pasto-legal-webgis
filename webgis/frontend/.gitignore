@@ -43,5 +43,3 @@ __screenshots__/
 .DS_Store
 Thumbs.db
 
-# fazenda real de teste (não versionar)
-public/fazenda-teste.geojson
