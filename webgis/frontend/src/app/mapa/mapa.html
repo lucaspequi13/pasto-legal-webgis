@@ -1,4 +1,23 @@
 <div #mapEl class="mapa"></div>
+
+<div class="barra">
+  @if (!desenhando()) {
+    <button type="button" class="btn primario" (click)="iniciarDesenho()">+ Novo piquete</button>
+  } @else {
+    <span class="dica">Clique para marcar os pontos · duplo clique fecha · Backspace desfaz · Esc cancela</span>
+    <button type="button" class="btn" (click)="desfazerPonto()">Desfazer ponto</button>
+    <button type="button" class="btn" (click)="cancelarDesenho()">Cancelar</button>
+  }
+</div>
+
+@if (selecionado(); as sel) {
+  <div class="cartao">
+    <strong>{{ sel.nome }}</strong>
+    <span>{{ sel.areaHa }} ha</span>
+    <button type="button" class="fechar" (click)="limparSelecao()" aria-label="Fechar">×</button>
+  </div>
+}
+
 @if (aviso()) {
   <div class="aviso">{{ aviso() }}</div>
 }
