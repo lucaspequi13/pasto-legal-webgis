@@ -1,23 +1,80 @@
 <div #mapEl class="mapa"></div>
 
+@if (fazenda(); as faz) {
+  <div class="topo"><strong>{{ faz.nome }}</strong> · {{ faz.areaHa }} ha</div>
+}
+
+<!-- Barra de ações -->
 <div class="barra">
-  @if (!desenhando()) {
-    <button type="button" class="btn primario" (click)="iniciarDesenho()">+ Novo piquete</button>
-  } @else {
-    <span class="dica">Clique para marcar os pontos · duplo clique fecha · Backspace desfaz · Esc cancela</span>
-    <button type="button" class="btn" (click)="desfazerPonto()">Desfazer ponto</button>
-    <button type="button" class="btn" (click)="cancelarDesenho()">Cancelar</button>
+  @switch (modo()) {
+    @case ('parado') {
+      <button type="button" class="btn primario" (click)="iniciarPiquete()">+ Novo piquete</button>
+      <button type="button" class="btn" (click)="iniciarAlfinete()">+ Alfinete</button>
+      <button type="button" class="btn concluir" (click)="terminei()">Terminei</button>
+    }
+    @case ('piquete') {
+      <span class="dica">Clique nos cantos · duplo clique fecha · Backspace desfaz · Esc cancela</span>
+      <button type="button" class="btn" (click)="desfazerPonto()">Desfazer ponto</button>
+      <button type="button" class="btn" (click)="cancelarDesenho()">Cancelar</button>
+    }
+    @case ('alfinete') {
+      <span class="dica">Clique onde fica o bebedouro (ou outro ponto) · Esc cancela</span>
+      <button type="button" class="btn" (click)="cancelarDesenho()">Cancelar</button>
+    }
   }
 </div>
 
+<!-- Cartão do item selecionado -->
 @if (selecionado(); as sel) {
   <div class="cartao">
-    <strong>{{ sel.nome }}</strong>
-    <span>{{ sel.areaHa }} ha</span>
-    <button type="button" class="fechar" (click)="limparSelecao()" aria-label="Fechar">×</button>
+    <div class="cabecalho">
+      <strong>{{ sel.rotulo }}</strong>
+      @if (sel.areaHa) { <span class="area">{{ sel.areaHa }} ha</span> }
+      <button type="button" class="fechar" (click)="limparSelecao()" aria-label="Fechar">×</button>
+    </div>
+
+    @if (sel.tipo === 'pin') {
+      <label>Tipo
+        <select [value]="sel.pinType" (change)="mudarTipoAlfinete($any($event.target).value)">
+          <option value="bebedouro">Bebedouro</option>
+          <option value="outro">Outro</option>
+        </select>
+      </label>
+    }
+
+    <label>Nome
+      <input type="text" [value]="sel.nome" [placeholder]="sel.padrao"
+             (change)="renomear($any($event.target).value)" />
+    </label>
+
+    <p class="ajuda">
+      @if (sel.tipo === 'paddock') { Arraste os pontos laranja para ajustar o desenho. }
+      @else { Arraste o alfinete para mudar de lugar. }
+    </p>
+    <button type="button" class="btn perigo" (click)="apagarSelecionado()">Apagar</button>
   </div>
 }
 
-@if (aviso()) {
-  <div class="aviso">{{ aviso() }}</div>
+<!-- Resumo do "Terminei" -->
+@if (resumo(); as r) {
+  <div class="fundo" (click)="fecharResumo()"></div>
+  <div class="modal" role="dialog" aria-label="Resumo das alterações">
+    <h2>Resumo das alterações</h2>
+    <p class="ajuda">É isto que o Pasto Legal vai receber e pedir para o produtor confirmar no chat.</p>
+    <ul class="resumo">
+      <li><b>Piquetes novos:</b> {{ r.novos.length ? r.novos.join(', ') : 'nenhum' }}</li>
+      <li><b>Piquetes alterados:</b> {{ r.alterados.length ? r.alterados.join(', ') : 'nenhum' }}</li>
+      <li><b>Piquetes apagados:</b> {{ r.apagados.length ? r.apagados.join(', ') : 'nenhum' }}</li>
+      <li><b>Alfinetes novos:</b> {{ r.alfinetes.length ? r.alfinetes.join(', ') : 'nenhum' }}</li>
+    </ul>
+    <textarea readonly>{{ r.geojson }}</textarea>
+    <div class="acoes">
+      <button type="button" class="btn" (click)="fecharResumo()">Voltar a editar</button>
+      <button type="button" class="btn" (click)="copiarGeojson()">Copiar GeoJSON</button>
+      <button type="button" class="btn primario" (click)="baixarGeojson()">Baixar .geojson</button>
+    </div>
+  </div>
 }
+
+@if (nota()) { <div class="nota">{{ nota() }}</div> }
+@if (aviso()) { <div class="aviso">{{ aviso() }}</div> }
