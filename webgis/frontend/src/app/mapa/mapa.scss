@@ -5,3 +5,25 @@
   background: #b3261e; color: #fff; padding: 10px 16px; border-radius: 8px;
   font: 14px system-ui, sans-serif; z-index: 10;
 }
+
+.barra {
+  position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; z-index: 10;
+  background: rgba(30, 42, 38, 0.92); padding: 8px 10px; border-radius: 12px;
+  font: 14px system-ui, sans-serif; color: #fff;
+}
+.dica { padding: 0 6px; }
+.btn {
+  border: 0; border-radius: 8px; padding: 10px 16px; cursor: pointer;
+  font: 600 14px system-ui, sans-serif; background: #ECEAE4; color: #1E2A26;
+}
+.btn.primario { background: #C96A1B; color: #fff; }
+
+.cartao {
+  position: absolute; top: 16px; left: 16px; z-index: 10;
+  display: flex; align-items: center; gap: 12px;
+  background: #fff; color: #1E2A26; padding: 10px 12px 10px 16px; border-radius: 12px;
+  border-left: 6px solid #FF8A00; box-shadow: 0 4px 16px rgba(0,0,0,.25);
+  font: 15px system-ui, sans-serif;
+}
+.fechar { border: 0; background: none; font-size: 20px; cursor: pointer; color: #5A6560; }
