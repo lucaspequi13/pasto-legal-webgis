@@ -19,7 +19,12 @@
 }
 
 @if (somenteLeitura(); as msg) {
-  <div class="travado" [class.ok]="enviado()">{{ msg }}</div>
+  <div class="travado" [class.ok]="enviado()">
+    {{ msg }}
+    @if (msg.includes('Recarregue')) {
+      <button type="button" class="btn" (click)="recarregar()">Recarregar</button>
+    }
+  </div>
 }
 
 <!-- Barra de ações -->
@@ -32,12 +37,17 @@
       <button type="button" class="btn concluir" (click)="terminei()">Terminei</button>
     }
     @case ('piquete') {
-      <span class="dica">Clique nos cantos · duplo clique fecha · Backspace desfaz · Esc cancela</span>
-      <button type="button" class="btn" (click)="desfazerPonto()">Desfazer ponto</button>
+      @if (toque) {
+        <span class="dica">Encoste o dedo, contorne o pasto e solte para fechar.</span>
+      } @else {
+        <span class="dica">Clique nos cantos · duplo clique fecha · Backspace desfaz · Esc cancela</span>
+        <button type="button" class="btn" (click)="desfazerPonto()">↶ Desfazer ponto</button>
+        <button type="button" class="btn concluir" (click)="fecharPiquete()">✓ Fechar piquete</button>
+      }
       <button type="button" class="btn" (click)="cancelarDesenho()">Cancelar</button>
     }
     @case ('alfinete') {
-      <span class="dica">Clique onde fica o bebedouro (ou outro ponto) · Esc cancela</span>
+      <span class="dica">{{ toque ? 'Toque' : 'Clique' }} onde fica o bebedouro (ou outro ponto).</span>
       <button type="button" class="btn" (click)="cancelarDesenho()">Cancelar</button>
     }
   }

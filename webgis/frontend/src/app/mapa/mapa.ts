@@ -15,6 +15,8 @@ import Draw from 'ol/interaction/Draw';
 import Snap from 'ol/interaction/Snap';
 import Select from 'ol/interaction/Select';
 import Modify from 'ol/interaction/Modify';
+import DoubleClickZoom from 'ol/interaction/DoubleClickZoom';
+import { simplify } from '@turf/turf';
 import { click } from 'ol/events/condition';
 import type { Feature as GjFeature, Geometry as GjGeometry, Point as GjPoint } from 'geojson';
 import { environment } from '../../environments/environment';
@@ -170,6 +172,9 @@ export class Mapa implements AfterViewInit, OnDestroy {
   protected readonly selecionado = signal<InfoSelecionado | null>(null);
   protected readonly resumo = signal<Resumo | null>(null);
   private notaTimer?: ReturnType<typeof setTimeout>;
+
+  /** Tela de toque (celular/tablet): desenho "segura e arrasta" e alvos maiores. */
+  protected readonly toque = window.matchMedia('(pointer: coarse)').matches;
 
   /** Token do link (#t=...). Sem token = modo demonstração, sem API. */
   private readonly token = tokenDaUrl();
@@ -535,12 +540,12 @@ export class Mapa implements AfterViewInit, OnDestroy {
       condition: click,
       style: estiloSelecionado,
       filter: (f) => f.get('feature_type') === 'paddock' || f.get('feature_type') === 'pin',
-      hitTolerance: 5,
+      hitTolerance: this.toque ? 14 : 5,
     });
     this.select.on('select', () => this.atualizarCartao());
 
     // Editar: arrastar vértices do piquete (ou mover o alfinete) selecionado.
-    this.modify = new Modify({ features: this.select.getFeatures() });
+    this.modify = new Modify({ features: this.select.getFeatures(), pixelTolerance: this.toque ? 22 : 10 });
     const originais = new Map<Feature<Geometry>, Geometry>();
     this.modify.on('modifystart', (e) =>
       e.features.forEach((f) => {
@@ -652,7 +657,10 @@ export class Mapa implements AfterViewInit, OnDestroy {
     this.select?.setActive(false);
     this.modify?.setActive(false);
 
-    this.draw = new Draw({ type: tipo === 'piquete' ? 'Polygon' : 'Point' });
+    // No toque: "segura e arrasta" (mão livre) — encosta o dedo, contorna o pasto e solta.
+    // No mouse: clica nos cantos. Durante o desenho, toque duplo não dá zoom.
+    this.draw = new Draw({ type: tipo === 'piquete' ? 'Polygon' : 'Point', freehand: tipo === 'piquete' && this.toque });
+    this.zoomDuploToque(false);
     this.draw.on('drawend', (evt) => {
       const f = evt.feature as Feature<Geometry>;
       // Deixa o OpenLayers terminar o evento antes de mexer na fonte.
@@ -666,6 +674,11 @@ export class Mapa implements AfterViewInit, OnDestroy {
   }
 
   private concluirPiquete(f: Feature<Geometry>): void {
+    if (this.toque) {
+      // Traço de dedo tem centenas de pontos tremidos: suaviza (~2 m) antes das regras.
+      const suave = simplify(this.poly(f), { tolerance: 0.00002, highQuality: true });
+      f.setGeometry(this.geom(suave));
+    }
     f.set('feature_type', 'paddock');
     f.set('display_number', this.proximoNumero());
     this.fonte.addFeature(f);
@@ -716,7 +729,25 @@ export class Mapa implements AfterViewInit, OnDestroy {
     this.desfazerPonto();
   }
 
+  /** Liga/desliga o zoom do toque duplo (atrapalha fechar o piquete no celular). */
+  private zoomDuploToque(ativo: boolean): void {
+    this.map?.getInteractions().forEach((i) => {
+      if (i instanceof DoubleClickZoom) i.setActive(ativo);
+    });
+  }
+
+  /** Botão "✓ Fechar piquete" (desenho por cantos). */
+  protected fecharPiquete(): void {
+    if (this.modo() === 'piquete') this.draw?.finishDrawing();
+  }
+
+  protected recarregar(): void {
+    window.location.reload();
+  }
+
   private encerrarDesenho(): void {
+    // Religa o zoom do toque duplo depois que o OpenLayers terminar o evento do desenho.
+    setTimeout(() => this.zoomDuploToque(true), 300);
     if (this.draw) this.map?.removeInteraction(this.draw);
     if (this.snapDesenho) this.map?.removeInteraction(this.snapDesenho);
     this.draw = undefined;
