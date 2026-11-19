@@ -188,7 +188,7 @@ export class Mapa implements AfterViewInit, OnDestroy {
   private grudouEm = new Set<string>();
 
   /** Tela de toque (celular/tablet): desenho "segura e arrasta" e alvos maiores. */
-  protected readonly toque = window.matchMedia('(pointer: coarse)').matches;
+  protected readonly toque = window.matchMedia?.('(pointer: coarse)')?.matches ?? false;
 
   /** Token do link (#t=...). Sem token = modo demonstração, sem API. */
   private readonly token = tokenDaUrl();
