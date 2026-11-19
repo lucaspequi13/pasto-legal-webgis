@@ -13,6 +13,7 @@ import { fromLonLat } from 'ol/proj';
 import { Circle as CircleStyle, Fill, Stroke, Style, Text } from 'ol/style';
 import Draw from 'ol/interaction/Draw';
 import Snap from 'ol/interaction/Snap';
+import type { SnapEvent } from 'ol/events/SnapEvent';
 import Select from 'ol/interaction/Select';
 import Modify from 'ol/interaction/Modify';
 import DoubleClickZoom from 'ol/interaction/DoubleClickZoom';
@@ -121,6 +122,14 @@ function estiloSelecionado(f: FeatureLike): Style {
   });
 }
 
+function lerIma(): boolean {
+  try {
+    return localStorage.getItem('webgis-ima') !== 'off';
+  } catch {
+    return true;
+  }
+}
+
 // ---------- componente ----------
 
 interface InfoSelecionado {
@@ -172,6 +181,11 @@ export class Mapa implements AfterViewInit, OnDestroy {
   protected readonly selecionado = signal<InfoSelecionado | null>(null);
   protected readonly resumo = signal<Resumo | null>(null);
   private notaTimer?: ReturnType<typeof setTimeout>;
+
+  /** Ímã: o traço gruda na cerca e nos piquetes vizinhos. Começa ligado; a escolha fica guardada. */
+  protected readonly ima = signal(lerIma());
+  /** Onde o último desenho/edição grudou (para o aviso "Grudou no Piquete 2"). */
+  private grudouEm = new Set<string>();
 
   /** Tela de toque (celular/tablet): desenho "segura e arrasta" e alvos maiores. */
   protected readonly toque = window.matchMedia('(pointer: coarse)').matches;
@@ -547,12 +561,13 @@ export class Mapa implements AfterViewInit, OnDestroy {
     // Editar: arrastar vértices do piquete (ou mover o alfinete) selecionado.
     this.modify = new Modify({ features: this.select.getFeatures(), pixelTolerance: this.toque ? 22 : 10 });
     const originais = new Map<Feature<Geometry>, Geometry>();
-    this.modify.on('modifystart', (e) =>
+    this.modify.on('modifystart', (e) => {
+      this.grudouEm.clear();
       e.features.forEach((f) => {
         const g = (f as Feature<Geometry>).getGeometry();
         if (g) originais.set(f as Feature<Geometry>, g.clone());
-      }),
-    );
+      });
+    });
     this.modify.on('modifyend', (e) => {
       e.features.forEach((x) => {
         const f = x as Feature<Geometry>;
@@ -561,11 +576,13 @@ export class Mapa implements AfterViewInit, OnDestroy {
         if (!ok && original) f.setGeometry(original);
       });
       originais.clear();
+      this.avisarGrudou();
       this.atualizarCartao();
     });
 
     // O Snap precisa vir DEPOIS do Modify/Draw.
-    this.snapEdicao = new Snap({ source: this.fonte, pixelTolerance: 12 });
+    this.snapEdicao = this.novoSnap();
+    this.snapEdicao.setActive(this.ima());
     this.map.addInteraction(this.select);
     this.map.addInteraction(this.modify);
     this.map.addInteraction(this.snapEdicao);
@@ -667,7 +684,9 @@ export class Mapa implements AfterViewInit, OnDestroy {
       setTimeout(() => (tipo === 'piquete' ? this.concluirPiquete(f) : this.concluirAlfinete(f)));
       this.encerrarDesenho();
     });
-    this.snapDesenho = new Snap({ source: this.fonte, pixelTolerance: 12 });
+    this.grudouEm.clear();
+    this.snapDesenho = this.novoSnap();
+    this.snapDesenho.setActive(this.ima());
     this.map.addInteraction(this.draw);
     this.map.addInteraction(this.snapDesenho);
     this.modo.set(tipo);
@@ -686,6 +705,8 @@ export class Mapa implements AfterViewInit, OnDestroy {
       this.fonte.removeFeature(f); // recusado: o número volta a ficar livre
       return;
     }
+    if (!this.nota()) this.avisarGrudou();
+    else this.grudouEm.clear();
     if (this.fonte.hasFeature(f)) this.selecionar(f);
   }
 
@@ -727,6 +748,39 @@ export class Mapa implements AfterViewInit, OnDestroy {
     const alvo = evt.target as HTMLElement | null;
     if (alvo && (alvo.tagName === 'INPUT' || alvo.tagName === 'TEXTAREA' || alvo.tagName === 'SELECT')) return;
     this.desfazerPonto();
+  }
+
+  /** Snap que anota onde grudou (cerca ou nome do piquete). */
+  private novoSnap(): Snap {
+    const snap = new Snap({ source: this.fonte, pixelTolerance: this.toque ? 16 : 12 });
+    snap.on('snap', (e: SnapEvent) => {
+      const f = e.feature;
+      if (!f || f === this.selecionadoAtual()) return;
+      this.grudouEm.add(f.get('feature_type') === 'rural_property' ? 'na cerca' : `no ${rotulo(f)}`);
+    });
+    return snap;
+  }
+
+  /** Tecla 🧲 Grudar: liga/desliga o ímã (vale para desenhar e para editar). */
+  protected alternarIma(): void {
+    const ligado = !this.ima();
+    this.ima.set(ligado);
+    this.snapEdicao?.setActive(ligado);
+    this.snapDesenho?.setActive(ligado);
+    try {
+      localStorage.setItem('webgis-ima', ligado ? 'on' : 'off');
+    } catch {
+      /* navegador sem armazenamento: só não lembra a escolha */
+    }
+    this.mostrarNota(ligado ? 'Grudar ligado: o traço encosta na cerca e nos vizinhos.' : 'Grudar desligado: dá para deixar espaço (corredor) entre piquetes.');
+  }
+
+  /** Aviso no topo: "Grudou no Piquete 2" (some sozinho). */
+  private avisarGrudou(): void {
+    if (!this.grudouEm.size) return;
+    const onde = [...this.grudouEm].join(' e ');
+    this.grudouEm.clear();
+    this.mostrarNota(`🧲 Grudou ${onde}. Para deixar espaço, desligue o Grudar.`);
   }
 
   /** Liga/desliga o zoom do toque duplo (atrapalha fechar o piquete no celular). */
