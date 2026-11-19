@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
+from app.migrate import upgrade
 
 KEY = "chave-interna-teste"
 
@@ -17,6 +18,7 @@ def database_url():
     pgserver = pytest.importorskip("pgserver")
     folder = tempfile.mkdtemp(prefix="webgis-pg-")
     server = pgserver.get_server(folder, cleanup_mode="stop")
+    upgrade(server.get_uri())  # as tabelas vêm das migrações, como em produção
     yield server.get_uri()
     server.cleanup()
     shutil.rmtree(folder, ignore_errors=True)

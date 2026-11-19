@@ -44,6 +44,9 @@ os.environ.setdefault(
 )
 
 from app.main import get_app  # noqa: E402  (depois das variáveis)
+from app.migrate import upgrade  # noqa: E402
+
+upgrade()  # cria/atualiza as tabelas (migrações)
 
 print(f"API em http://{ip}:8100 · chave interna: dev · links abrem em {os.environ['WEBGIS_PUBLIC_URL']}")
 uvicorn.run(get_app(), host="0.0.0.0", port=8100)
