@@ -25,6 +25,8 @@ export type Poligono = Feature<Polygon | MultiPolygon>;
 export const AREA_MINIMA_M2 = 1;
 /** Fração máxima fora da cerca que ainda é corrigida automaticamente. */
 export const LIMITE_FORA = 0.1;
+/** Pedaço menor que isso (m², ~0,05 ha) nunca vira piquete: é juntado a um vizinho. */
+export const LASCA_M2 = 500;
 
 function valido(p: Poligono | null): Poligono | null {
   return p && area(p) >= AREA_MINIMA_M2 ? p : null;
@@ -38,6 +40,11 @@ export function interseccao(a: Poligono, b: Poligono): Poligono | null {
 /** A sem a parte de B (ou null se não sobrar área). */
 export function diferenca(a: Poligono, b: Poligono): Poligono | null {
   return valido(difference(featureCollection([a, b])) as Poligono | null);
+}
+
+/** A unido com B. */
+export function uniao(a: Poligono, b: Poligono): Poligono {
+  return (union(featureCollection([a, b])) as Poligono | null) ?? a;
 }
 
 /** Quebra em polígonos simples, do maior para o menor, descartando ruído. */
@@ -75,6 +82,46 @@ export function aplicarCerca(original: Poligono, cerca: Poligono): ResultadoCerc
   const ajustado = fora > 0.0005; // > 0,05%: houve corte de verdade
   // Traço consertado também conta como ajustado, para o mapa redesenhar a forma real.
   return { tipo: 'ok', geom: ajustado ? dentro : piquete, ajustado: ajustado || piquete !== original };
+}
+
+export interface ResultadoSobreposicao {
+  /** nada = não cruzou · antigo = o que já existia ficou com a parte em comum · dividiu = desenho dentro de um piquete */
+  tipo: 'nada' | 'antigo' | 'dividiu';
+  /** O que sobra do desenho novo (null = sumiu, virou piquete novo dentro do antigo). */
+  novo: Poligono | null;
+  /** O piquete que já existia (mantém o número). */
+  vizinho: Poligono;
+  /** Pedaços que viram piquetes novos (só quando dividiu). */
+  novos: Poligono[];
+}
+
+/**
+ * Resolve o desenho `novo` cruzando o piquete `vizinho` que já existia (decisão de 19/11):
+ *
+ * - O que já existia manda: a parte em comum continua do piquete antigo e o desenho
+ *   novo fica só com o que sobra. Nenhum piquete novo nasce disso.
+ * - Exceção: desenho INTEIRO dentro de um piquete = dividir o piquete. O desenho vira
+ *   piquete novo e o antigo fica com o resto (o maior pedaço mantém o número).
+ * - Lasca menor que LASCA_M2 nunca vira piquete: junta ao piquete antigo.
+ */
+export function resolverSobreposicao(novo: Poligono, vizinho: Poligono): ResultadoSobreposicao {
+  const comum = interseccao(novo, vizinho);
+  if (!comum) return { tipo: 'nada', novo, vizinho, novos: [] };
+
+  const restoNovo = diferenca(novo, vizinho);
+  if (restoNovo) return { tipo: 'antigo', novo: restoNovo, vizinho, novos: [] };
+
+  // Desenho inteiro dentro do piquete: dividir.
+  const restoVizinho = diferenca(vizinho, novo);
+  if (!restoVizinho) return { tipo: 'antigo', novo: null, vizinho, novos: [] }; // desenhou por cima igualzinho
+  const [maior, ...extras] = partes(restoVizinho);
+  let v = maior;
+  const novos: Poligono[] = [];
+  for (const p of [...extras, ...partes(comum)]) {
+    if (area(p) < LASCA_M2) v = uniao(v, p);
+    else novos.push(p);
+  }
+  return { tipo: 'dividiu', novo: null, vizinho: v, novos };
 }
 
 /** Alfinete precisa estar dentro da fazenda. */

@@ -18,7 +18,17 @@ import Modify from 'ol/interaction/Modify';
 import { click } from 'ol/events/condition';
 import type { Feature as GjFeature, Geometry as GjGeometry, Point as GjPoint } from 'geojson';
 import { environment } from '../../environments/environment';
-import { Poligono, aplicarCerca, areaHa, consertar, diferenca, interseccao, partes, pontoDentro } from './regras';
+import {
+  LASCA_M2,
+  Poligono,
+  aplicarCerca,
+  areaHa,
+  consertar,
+  partes,
+  pontoDentro,
+  resolverSobreposicao,
+  uniao,
+} from './regras';
 import { AlfineteApi, ErroApi, LinkApi, PiqueteApi, api, tokenDaUrl } from './api';
 
 // IDs do satélite no MapTiler, do mais novo para o mais antigo; usa o primeiro que existir.
@@ -476,35 +486,41 @@ export class Mapa implements AfterViewInit, OnDestroy {
       }
     }
 
-    // Sobreposição: vira fatias. O maior pedaço de cada piquete antigo mantém o número;
-    // a parte em comum nasce como piquete novo.
+    // Sobreposição (regras.resolverSobreposicao): o que já existia manda; o desenho novo
+    // fica com o que sobra. Desenho inteiro dentro de um piquete = dividir esse piquete.
     let atual: Poligono | null = this.poly(f);
-    let cruzou = false;
+    const encostou: string[] = [];
+    let dividiu = false;
     for (const vizinho of this.piquetes(f)) {
       if (!atual) break;
-      const v = this.poly(vizinho);
-      const comum = interseccao(atual, v);
-      if (!comum) continue;
-      cruzou = true;
-      const restoVizinho = diferenca(v, atual);
-      if (restoVizinho) {
-        const [maior, ...extras] = partes(restoVizinho);
-        vizinho.setGeometry(this.geom(maior));
-        extras.forEach((p) => this.novoPiquete(p));
-        partes(comum).forEach((p) => this.novoPiquete(p));
-      }
-      // Se o vizinho estava inteiro dentro do novo, ele fica como está e só sai do novo.
-      atual = diferenca(atual, v);
+      const r = resolverSobreposicao(atual, this.poly(vizinho));
+      if (r.tipo === 'nada') continue;
+      vizinho.setGeometry(this.geom(r.vizinho));
+      r.novos.forEach((p) => this.novoPiquete(p));
+      if (r.tipo === 'antigo') encostou.push(rotulo(vizinho));
+      else dividiu = true;
+      atual = r.novo;
     }
 
     if (!atual) {
       this.fonte.removeFeature(f); // o desenho virou só partes em comum
-    } else if (cruzou) {
+    } else if (encostou.length || dividiu) {
+      if (areaHa(atual) * 10_000 < LASCA_M2) {
+        this.fonte.removeFeature(f); // só sobrou uma lasca: não vira piquete
+        this.mostrarNota(`Esse espaço já é do ${encostou.join(', ')}.`);
+        return true;
+      }
+      // Pedaços soltos grandes viram piquetes; lascas ficam junto do desenho.
       const [maior, ...extras] = partes(atual);
-      f.setGeometry(this.geom(maior));
-      extras.forEach((p) => this.novoPiquete(p));
+      let g = maior;
+      for (const p of extras) {
+        if (areaHa(p) * 10_000 < LASCA_M2) g = uniao(g, p);
+        else this.novoPiquete(p);
+      }
+      f.setGeometry(this.geom(g));
     }
-    if (cruzou) mensagens.push('Cruzou outro piquete: as partes viraram piquetes menores.');
+    if (encostou.length) mensagens.push(`A parte por cima do ${encostou.join(', ')} continuou dele.`);
+    if (dividiu) mensagens.push('Desenho dentro de um piquete: ele foi dividido.');
     if (mensagens.length) this.mostrarNota(mensagens.join(' '));
     return true;
   }
