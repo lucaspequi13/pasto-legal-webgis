@@ -3,6 +3,7 @@
 @if (fazenda(); as faz) {
   <div class="topo">
     <strong>{{ faz.nome }}</strong> · {{ faz.areaHa }} ha
+    @if (!comApi) { <span class="estado erro">modo demonstração: nada é salvo</span> }
     @if (comApi && !somenteLeitura()) {
       <span class="estado" [class]="'estado ' + salvar()">
         @switch (salvar()) {
@@ -79,7 +80,7 @@
   <div class="fundo" (click)="fecharResumo()"></div>
   <div class="modal" role="dialog" aria-label="Resumo das alterações">
     <h2>Resumo das alterações</h2>
-    <p class="ajuda">É isto que o Pasto Legal vai receber e pedir para o produtor confirmar no chat.</p>
+    <p class="ajuda">Modo demonstração (sem link do chat): nada foi salvo. Com o link do WhatsApp, isto vai para o Pasto Legal confirmar.</p>
     <ul class="resumo">
       <li><b>Piquetes novos:</b> {{ r.novos.length ? r.novos.join(', ') : 'nenhum' }}</li>
       <li><b>Piquetes alterados:</b> {{ r.alterados.length ? r.alterados.join(', ') : 'nenhum' }}</li>

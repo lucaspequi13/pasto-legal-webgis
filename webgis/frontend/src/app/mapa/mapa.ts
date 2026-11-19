@@ -190,6 +190,8 @@ export class Mapa implements AfterViewInit, OnDestroy {
       layers: [new VectorLayer({ source: this.fonte, style: estiloFeicao, zIndex: 10 })],
       view: new View({ center: fromLonLat([-49.25, -16.68]), zoom: 14 }),
     });
+    // Colar outro link na mesma aba só muda o "#": o navegador não recarrega sozinho.
+    window.addEventListener('hashchange', () => window.location.reload());
     this.carregarSatelite();
     this.ativarEdicao();
     if (this.token) this.carregarDaApi(this.token);
