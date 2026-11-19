@@ -24,7 +24,13 @@ from domain.services.geospatial.geojson_io import (
     GeoFileError,
     build_features_from_geojson,
 )
-from domain.schemas.feature import Feature, FeatureMetadata, RegisteredFeatures
+from domain.schemas.feature import (
+    NUMBER_KEY,
+    PARENT_ID_KEY,
+    Feature,
+    FeatureMetadata,
+    RegisteredFeatures,
+)
 from domain.utils.feature_utils import get_registered_features, set_registered_features
 
 # Bounds of the buffer radius accepted by the buffer registration tools (meters).
@@ -613,22 +619,27 @@ def _persist_registration(run_context: RunContext, candidate_properties: list, n
     registered_features = get_registered_features(run_context.session_state)
     registered_features.features.append(registered_feature)
 
-    # Paddocks (from a geospatial file registration) are registered with
-    # the paddock number kept on the stable id. The display name stored as
-    # metadata is "{name} - {source name}" when the source file names the
-    # paddock, or "{name}_{n}" when it does not.
+    # Paddocks (from a geospatial file registration) are linked to the
+    # property by ``parent_id`` and get an id that carries the property id,
+    # so two properties never share "Paddock_1". The display name is composed
+    # on the fly ("{own name or Piquete n} · {property name}", see
+    # RegisteredFeatures.paddock_label); only the name from the source file,
+    # when there is one, is stored as the paddock's own name.
     pending_paddocks = run_context.session_state.get("pending_paddocks") or []
     for paddock in pending_paddocks:
         paddock_feature = Feature.model_validate(paddock)
-        paddock_number = str(paddock_feature.feature_id).rsplit("_", 1)[-1]
+        paddock_number = int(str(paddock_feature.feature_id).rsplit("_", 1)[-1])
         paddock_metadata = [
-            entry for entry in paddock_feature.metadata if entry.key != "name"
+            entry for entry in paddock_feature.metadata
+            if entry.key not in (PARENT_ID_KEY, NUMBER_KEY)
         ]
-        source_name = paddock_feature.name
-        paddock_name = f"{name} - {source_name}" if source_name else f"{name}_{paddock_number}"
-        paddock_metadata.append(FeatureMetadata(key="name", value=paddock_name))
+        paddock_metadata.append(FeatureMetadata(key=PARENT_ID_KEY, value=registered_feature.id))
+        paddock_metadata.append(FeatureMetadata(key=NUMBER_KEY, value=paddock_number))
         registered_features.features.append(
-            paddock_feature.model_copy(update={"metadata": paddock_metadata})
+            paddock_feature.model_copy(update={
+                "feature_id": f"{registered_feature.id}_paddock_{paddock_number}",
+                "metadata": paddock_metadata,
+            })
         )
 
     set_registered_features(run_context.session_state, registered_features)

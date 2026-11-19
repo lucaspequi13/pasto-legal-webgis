@@ -17,6 +17,7 @@ import pytest
 from semente.backends.toolkit import StateContext
 from semente.tools import File
 
+from domain.schemas.feature import RegisteredFeatures
 from domain.tools import property_tools
 
 
@@ -148,20 +149,18 @@ def test_complete_registration_names_paddocks(fake_overview_image):
     registered = run_context.session_state["all_properties"]["features"]
     assert len(registered) == 3
 
-    # feature_id stays stable; the display name lives in metadata.
+    # The property id stays stable; paddock ids carry it, and the paddock
+    # display name is composed from its number and the property name.
     property_feature, *paddock_features = registered
     assert property_feature["feature_id"] != "Fazenda Primavera"
+    farm_id = property_feature["feature_id"]
     paddock_ids = [feature["feature_id"] for feature in paddock_features]
-    assert paddock_ids == ["Paddock_1", "Paddock_2"]
+    assert paddock_ids == [f"{farm_id}_paddock_1", f"{farm_id}_paddock_2"]
 
-    property_names = [
-        next(e["value"] for e in feature["metadata"] if e["key"] == "name")
-        for feature in registered
-    ]
-    assert property_names == [
-        "Fazenda Primavera",
-        "Fazenda Primavera_1",
-        "Fazenda Primavera_2",
+    features = _registered(run_context)
+    assert [features.paddock_label(p) for p in features.paddocks_of(farm_id)] == [
+        "Piquete 1 · Fazenda Primavera",
+        "Piquete 2 · Fazenda Primavera",
     ]
     assert run_context.session_state["registration_state"] is None
     assert run_context.session_state["candidate_properties"] is None
@@ -223,13 +222,6 @@ def _labeled_geojson(labels: list, parts: int = None) -> str:
     )
 
 
-def _registered_names(run_context) -> list:
-    return [
-        next((e["value"] for e in feature["metadata"] if e["key"] == "name"), None)
-        for feature in run_context.session_state["all_properties"]["features"]
-    ]
-
-
 def test_paddocks_list_number_and_source_name(fake_overview_image):
     run_context = _context()
 
@@ -244,7 +236,11 @@ def test_paddocks_list_number_and_source_name(fake_overview_image):
     assert [p["feature_id"] for p in paddocks] == ["Paddock_1", "Paddock_2"]
 
 
-def test_complete_registration_prefixes_the_farm_name(fake_overview_image):
+def _registered(run_context) -> RegisteredFeatures:
+    return RegisteredFeatures.model_validate(run_context.session_state["all_properties"])
+
+
+def test_complete_registration_links_paddocks_to_the_farm(fake_overview_image):
     run_context = _context()
     property_tools.start_registration_by_geojson(
         run_context=run_context,
@@ -253,14 +249,38 @@ def test_complete_registration_prefixes_the_farm_name(fake_overview_image):
 
     property_tools.complete_registration(run_context=run_context, name="Fazenda Um")
 
-    assert _registered_names(run_context) == [
-        "Fazenda Um",
-        "Fazenda Um - Piquete A",
-        "Fazenda Um_2",
+    registered = _registered(run_context)
+    farm = registered.find_by_any("Fazenda Um")
+    paddocks = registered.paddocks_of(farm.id)
+    # The id carries the farm id; the number and the file name are kept.
+    assert [p.feature_id for p in paddocks] == [f"{farm.id}_paddock_1", f"{farm.id}_paddock_2"]
+    assert [registered.paddock_label(p) for p in paddocks] == [
+        "Piquete A · Fazenda Um",
+        "Piquete 2 · Fazenda Um",
+    ]
+    # Only the name from the file is stored as the paddock's own name.
+    assert [p.name for p in paddocks] == ["Piquete A", None]
+
+
+def test_paddock_label_follows_the_farm_name(fake_overview_image):
+    run_context = _context()
+    property_tools.start_registration_by_geojson(
+        run_context=run_context,
+        files=[_geojson_file(_labeled_geojson([None, None]))],
+    )
+    property_tools.complete_registration(run_context=run_context, name="Fazenda Um")
+    farm_id = _registered(run_context).find_by_any("Fazenda Um").id
+
+    property_tools.set_property_name(run_context=run_context, feature_id=farm_id, name="Sitio Novo")
+
+    registered = _registered(run_context)
+    assert [registered.paddock_label(p) for p in registered.paddocks_of(farm_id)] == [
+        "Piquete 1 · Sitio Novo",
+        "Piquete 2 · Sitio Novo",
     ]
 
 
-def test_same_file_on_two_farms_keeps_names_unique(fake_overview_image):
+def test_same_file_on_two_farms_keeps_ids_and_labels_unique(fake_overview_image):
     run_context = _context()
     for farm in ("Fazenda Um", "Fazenda Dois"):
         property_tools.start_registration_by_geojson(
@@ -269,9 +289,13 @@ def test_same_file_on_two_farms_keeps_names_unique(fake_overview_image):
         )
         property_tools.complete_registration(run_context=run_context, name=farm)
 
-    names = _registered_names(run_context)
-    assert len(names) == len(set(names))
-    assert "Fazenda Dois - Piquete A (2)" in names
+    registered = _registered(run_context)
+    paddocks = [f for f in registered.features if f.feature_type == "paddock"]
+    ids = [p.feature_id for p in paddocks]
+    labels = [registered.paddock_label(p) for p in paddocks]
+    assert len(ids) == len(set(ids)) == 4
+    assert len(labels) == len(set(labels))
+    assert "Piquete A (2) · Fazenda Dois" in labels
 
 
 def test_repeated_names_in_one_file_are_numbered(fake_overview_image):

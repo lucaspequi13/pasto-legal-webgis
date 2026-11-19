@@ -1,12 +1,17 @@
 from uuid import uuid4
-from typing import List, Optional, Union
+from typing import List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
 
 # Buffer metadata that only adds noise to the agent's system prompt. It stays
 # available in user-facing tool confirmations, where the radius is useful.
-_PROMPT_HIDDEN_METADATA = frozenset({"radius", "center"})
+_PROMPT_HIDDEN_METADATA = frozenset({"radius", "center", "parent_id", "number"})
+
+# Paddock metadata keys: the stable id of the property it belongs to and the
+# insertion-order number used in the default display name ("Piquete 3").
+PARENT_ID_KEY = "parent_id"
+NUMBER_KEY = "number"
 
 
 def _compute_area_weighted_centroid(coords) -> tuple[float, float]:
@@ -158,7 +163,9 @@ class Feature(BaseModel):
     def get_centroid(self) -> tuple[float, float]:
         return _compute_area_weighted_centroid(self.coords)
 
-    def describe(self, exclude_metadata=()) -> str:
+    def describe(self, exclude_metadata=(), display_name: Optional[str] = None) -> str:
+        """Describes the feature; ``display_name`` overrides the stored name
+        (used for paddocks, whose label is composed with the property name)."""
         hidden = set(exclude_metadata)
         details = ", ".join(
             f"{entry.key}: {entry.value}"
@@ -167,7 +174,8 @@ class Feature(BaseModel):
         )
         region = f", Região: {self.region}" if self.region else ""
         metadata = f", {details}" if details else ""
-        name = f", Nome: {self.name}" if self.name else ""
+        shown_name = display_name or self.name
+        name = f", Nome: {shown_name}" if shown_name else ""
         return (
             f"Feature ID: {self.id}{name}, "
             f"Tipo: {self.feature_type}, "
@@ -216,12 +224,35 @@ class Feature(BaseModel):
         )
 
 
+class Pin(BaseModel):
+    """Point marked by the producer on the WebGIS map (e.g. a water trough).
+
+    A free "area of interest" (e.g. a spring) is a pin of kind ``outro``
+    with a name; there is no polygon type for it.
+    """
+
+    pin_id: str = Field(..., description="Identificador estável do alfinete.")
+    parent_id: str = Field(..., description="feature_id da propriedade onde o alfinete está.")
+    kind: Literal["bebedouro", "outro"] = Field(..., description="Tipo do alfinete.")
+    name: Optional[str] = Field(default=None, description="Nome dado pelo produtor.")
+    lon: float = Field(..., description="Longitude (WGS84).")
+    lat: float = Field(..., description="Latitude (WGS84).")
+
+    @staticmethod
+    def generate_id() -> str:
+        return uuid4().hex[:12]
+
+
 class RegisteredFeatures(BaseModel):
     """All features registered in the system for the current session."""
 
     features: List[Feature] = Field(
         default_factory=list,
         description="Feições registradas no sistema."
+    )
+    pins: List[Pin] = Field(
+        default_factory=list,
+        description="Alfinetes marcados no WebGIS."
     )
 
     def find_by_id(self, feature_id: str) -> Optional[Feature]:
@@ -231,8 +262,40 @@ class RegisteredFeatures(BaseModel):
             None,
         )
 
+    def paddocks_of(self, parent_id: str) -> List[Feature]:
+        """Paddocks that belong to the property ``parent_id``."""
+        return [
+            feature for feature in self.features
+            if feature.feature_type == "paddock"
+            and feature.get_metadata(PARENT_ID_KEY) == parent_id
+        ]
+
+    def pins_of(self, parent_id: str) -> List[Pin]:
+        """Pins placed inside the property ``parent_id``."""
+        return [pin for pin in self.pins if pin.parent_id == parent_id]
+
+    def paddock_label(self, paddock: Feature) -> Optional[str]:
+        """Display name of a paddock, composed on the fly so it follows the
+        property name: "{own name or Piquete n} · {property name}".
+
+        Paddocks registered before ``parent_id`` existed keep their stored
+        name unchanged.
+        """
+        parent_id = paddock.get_metadata(PARENT_ID_KEY)
+        if parent_id is None:
+            return paddock.name
+        own = paddock.name
+        number = paddock.get_metadata(NUMBER_KEY)
+        base = own or (f"Piquete {number}" if number is not None else None)
+        parent = self.find_by_id(str(parent_id))
+        parent_name = parent.name if parent is not None else None
+        if base and parent_name:
+            return f"{base} · {parent_name}"
+        return base or parent_name
+
     def find_by_any(self, value: str) -> Optional[Feature]:
-        """Finds a feature by id, user-chosen name, or constituent CAR code.
+        """Finds a feature by id, user-chosen name, paddock label, or
+        constituent CAR code.
 
         Unified properties join several CAR codes with ", " in the
         ``car_code`` metadata; any one of them resolves to the unified
@@ -243,6 +306,8 @@ class RegisteredFeatures(BaseModel):
                 return feature
             if feature.get_metadata("name") == value:
                 return feature
+            if feature.feature_type == "paddock" and self.paddock_label(feature) == value:
+                return feature
             car_codes = feature.get_metadata("car_code")
             if car_codes is not None and value in str(car_codes).split(", "):
                 return feature
@@ -250,15 +315,27 @@ class RegisteredFeatures(BaseModel):
 
     def build_prompt(self) -> str:
         """Builds a prompt describing every registered feature, clustered
-        by feature type inside ``<feature_type>...</feature_type>`` tags."""
+        by feature type inside ``<feature_type>...</feature_type>`` tags.
+        Pins go in a ``<pin>`` block."""
 
-        if not self.features:
+        if not self.features and not self.pins:
             return ""
 
         clusters: dict[str, List[str]] = {}
         for feature in self.features:
-            description = feature.describe(exclude_metadata=_PROMPT_HIDDEN_METADATA)
+            display_name = self.paddock_label(feature) if feature.feature_type == "paddock" else None
+            description = feature.describe(
+                exclude_metadata=_PROMPT_HIDDEN_METADATA, display_name=display_name
+            )
             clusters.setdefault(feature.feature_type, []).append(description)
+
+        for pin in self.pins:
+            parent = self.find_by_id(pin.parent_id)
+            where = f" na propriedade {parent.name or parent.id}" if parent is not None else ""
+            label = pin.name or pin.kind.capitalize()
+            clusters.setdefault("pin", []).append(
+                f"Alfinete: {label} (tipo {pin.kind}){where}, lat {pin.lat:.5f}, lon {pin.lon:.5f}."
+            )
 
         parts: List[str] = []
         for feature_type, descriptions in clusters.items():
