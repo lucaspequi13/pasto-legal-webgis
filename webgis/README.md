@@ -54,6 +54,10 @@ python webgis/scripts/exportar_fazenda.py CAMINHO/pasto-legal/tmp/agno.db 2 \
   webgis/frontend/public/fazenda-teste.geojson --so-fazenda --nome "Fazenda teste"
 ```
 
-## Próximos passos (fora do protótipo)
+## Contrato com o Pasto Legal
 
-API (FastAPI + PostGIS) para salvar o rascunho · link com hash de 5 min · integração com o chat (snapshot no link, `webgis_pending`, "confirma?") · deploy no servidor do LAPIG.
+O WebGIS é uma aplicação separada do Pasto Legal. O que cada lado manda e recebe está em [`CONTRATO.md`](CONTRATO.md); enquanto o Pasto Legal não tem a integração, `scripts/mock_pasto_legal.py` faz o papel dele.
+
+## Próximos passos
+
+Celular (segura e arrasta) · integração no Pasto Legal seguindo o contrato · deploy no servidor do LAPIG.

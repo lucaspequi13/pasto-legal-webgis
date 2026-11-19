@@ -155,3 +155,12 @@ def test_owner_is_hmac_and_lgpd_delete(client, snapshot):
     r = client.delete("/internal/owners/5562999990000", headers=H)
     assert r.json()["deleted_links"] == 1
     assert client.get(f"/links/{token}").status_code == 404
+
+
+def test_no_changes_means_nothing_to_confirm(client, snapshot):
+    token, _ = _link(client, snapshot)
+    v = client.get(f"/links/{token}").json()["version"]
+    _save(client, token, v, snapshot["paddocks"])  # salvou igual ao que veio do chat
+    client.post(f"/links/{token}/finish")
+    draft = client.get("/internal/drafts", params={"user_id": "5562999990000"}, headers=H).json()["draft"]
+    assert draft is None

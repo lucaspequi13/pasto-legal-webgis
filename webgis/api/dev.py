@@ -36,6 +36,8 @@ def ip_local() -> str:
 
 ip = ip_local()
 os.environ.setdefault("WEBGIS_PUBLIC_URL", f"http://{ip}:4200")
+# Aviso do "Terminei" vai para o mock do Pasto Legal (webgis/scripts/mock_pasto_legal.py escutar).
+os.environ.setdefault("PASTO_LEGAL_EVENTS_URL", "http://localhost:8200/internal/webgis-events")
 os.environ.setdefault(
     "WEBGIS_CORS_ORIGIN_REGEX",
     r"http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.\d+\.\d+\.\d+):4200",

@@ -168,11 +168,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ).fetchone()
         if not row:
             return
+        summary = summarize(row["snapshot"], row["content"])
+        if not summary["tem_mudancas"]:
+            return  # "Terminei" sem mexer em nada: não incomoda o produtor no WhatsApp
         body = {
             "owner": row["owner"],
             "draft_id": row["id"],
             "farm_id": row["farm_id"],
-            "summary": summarize(row["snapshot"], row["content"]),
+            "summary": summary,
         }
         try:
             async with httpx.AsyncClient(timeout=5) as client:
@@ -326,6 +329,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ).fetchone()
         if not row:
             return {"draft": None}
+        summary = summarize(row["snapshot"], row["content"])
+        if not summary["tem_mudancas"]:
+            return {"draft": None}  # nada mudou: nada para confirmar
         return {"draft": {
             "id": row["id"],
             "farm_id": row["farm_id"],
@@ -333,7 +339,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "version": row["version"],
             "snapshot": row["snapshot"],
             "content": row["content"],
-            "summary": summarize(row["snapshot"], row["content"]),
+            "summary": summary,
         }}
 
     @app.post("/internal/drafts/{draft_id}/status", dependencies=[Depends(internal)])
