@@ -125,6 +125,7 @@ def check_draft(fence_geojson: dict, content: dict, max_paddocks: int) -> Checke
             "lat": float(pin["lat"]),
         })
 
+    paddocks_out.sort(key=lambda p: p["number"])  # sempre na ordem dos números
     return CheckedDraft({"paddocks": paddocks_out, "pins": pins_out}, warnings)
 
 
