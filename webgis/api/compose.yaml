@@ -1,0 +1,14 @@
+# Banco local para desenvolvimento. Em produção usa o Postgres do time (schema "webgis").
+services:
+  webgis-db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: webgis
+      POSTGRES_PASSWORD: webgis
+      POSTGRES_DB: webgis
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - webgis-db:/var/lib/postgresql/data
+volumes:
+  webgis-db:
