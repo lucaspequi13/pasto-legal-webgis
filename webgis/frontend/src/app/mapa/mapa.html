@@ -41,6 +41,8 @@
     @case ('parado') {
       <button type="button" class="btn primario" (click)="iniciarPiquete()">+ Novo piquete</button>
       <button type="button" class="btn" (click)="iniciarAlfinete()">+ Alfinete</button>
+      <button type="button" class="btn" (click)="voltar()" [disabled]="!podeVoltar()" title="Voltar (Ctrl+Z)">↶ Voltar</button>
+      <button type="button" class="btn" (click)="refazer()" [disabled]="!podeRefazer()" title="Refazer (Ctrl+Shift+Z)">↷ Refazer</button>
       <button type="button" class="btn concluir" (click)="terminei()">Terminei</button>
       <button type="button" class="btn ima" [class.desligado]="!ima()" (click)="alternarIma()"
               role="switch" [attr.aria-checked]="ima()"><span class="chave" aria-hidden="true"></span>Grudar Piquetes</button>

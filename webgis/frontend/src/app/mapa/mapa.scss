@@ -19,6 +19,7 @@
   border: 0; border-radius: 8px; padding: 10px 16px; cursor: pointer;
   font: 600 14px system-ui, sans-serif; background: #ECEAE4; color: #1E2A26;
 }
+.btn:disabled { opacity: 0.4; cursor: default; }
 .btn.primario { background: #C96A1B; color: #fff; }
 .btn.concluir { background: #2E7D32; color: #fff; }
 .btn.perigo { background: #fdecea; color: #b3261e; }

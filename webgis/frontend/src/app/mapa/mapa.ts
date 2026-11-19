@@ -41,6 +41,8 @@ const SATELITE_IDS = ['satellite-v2', 'satellite-v4', 'satellite'];
 const FAZENDA_URL = 'fazenda-teste.geojson';
 /** Espera depois da última edição antes de salvar (salvar automático). */
 const ESPERA_SALVAR_MS = 1000;
+/** Quantos passos o "↶ Voltar" guarda. */
+const LIMITE_PASSOS = 100;
 /** Nome automático que o cadastro por arquivo gera hoje (ex.: "Paddock_3"). */
 const NOME_PADRAO_ARQUIVO = /^Paddock_(\d+)$/;
 
@@ -204,6 +206,11 @@ export class Mapa implements AfterViewInit, OnDestroy {
   protected readonly enviado = signal(false);
   /** Tela "Abrindo sua fazenda…" até o mapa chegar (no 4G lento leva alguns segundos). */
   protected readonly carregando = signal(true);
+  /** Voltar/Refazer: uma "foto" dos piquetes e alfinetes depois de cada ação terminada. */
+  private historico: string[] = [];
+  private posicao = 0;
+  protected readonly podeVoltar = signal(false);
+  protected readonly podeRefazer = signal(false);
 
   ngAfterViewInit(): void {
     this.map = new OlMap({
@@ -216,7 +223,10 @@ export class Mapa implements AfterViewInit, OnDestroy {
     this.carregarSatelite();
     this.ativarEdicao();
     const carregar = this.token ? this.carregarDaApi(this.token) : this.carregarFazenda();
-    carregar.finally(() => this.carregando.set(false));
+    carregar.finally(() => {
+      this.carregando.set(false);
+      this.iniciarHistorico();
+    });
   }
 
   ngOnDestroy(): void {
@@ -390,6 +400,8 @@ export class Mapa implements AfterViewInit, OnDestroy {
         const nova = this.fmt.writeGeometry(this.lerGeom(p.geometry), { decimals: 7 });
         if (nova !== this.fmt.writeGeometry(g, { decimals: 7 })) f.setGeometry(this.lerGeom(p.geometry));
       }
+      // A correção do servidor faz parte do passo atual (não vira um passo novo).
+      if (this.historico.length) this.historico[this.posicao] = this.foto();
     } finally {
       this.aplicandoServidor = false;
     }
@@ -580,6 +592,7 @@ export class Mapa implements AfterViewInit, OnDestroy {
       originais.clear();
       this.avisarGrudou();
       this.atualizarCartao();
+      this.registrarPasso();
     });
 
     // O Snap precisa vir DEPOIS do Modify/Draw.
@@ -642,6 +655,7 @@ export class Mapa implements AfterViewInit, OnDestroy {
     f.set('name', valor.trim() || undefined); // vazio volta para o nome padrão
     this.atualizarCartao();
     this.agendarSalvar();
+    this.registrarPasso();
   }
 
   protected mudarTipoAlfinete(valor: string): void {
@@ -650,6 +664,7 @@ export class Mapa implements AfterViewInit, OnDestroy {
     f.set('pin_type', valor === 'outro' ? 'outro' : 'bebedouro');
     this.atualizarCartao();
     this.agendarSalvar();
+    this.registrarPasso();
   }
 
   protected apagarSelecionado(): void {
@@ -658,6 +673,7 @@ export class Mapa implements AfterViewInit, OnDestroy {
     this.limparSelecao();
     this.fonte.removeFeature(f); // o número não é reaproveitado
     this.mostrarNota(`${rotulo(f)} apagado.`);
+    this.registrarPasso();
   }
 
   // ---------- desenhar piquete e alfinete ----------
@@ -710,6 +726,7 @@ export class Mapa implements AfterViewInit, OnDestroy {
     if (!this.nota()) this.avisarGrudou();
     else this.grudouEm.clear();
     if (this.fonte.hasFeature(f)) this.selecionar(f);
+    this.registrarPasso();
   }
 
   private concluirAlfinete(f: Feature<Geometry>): void {
@@ -718,6 +735,7 @@ export class Mapa implements AfterViewInit, OnDestroy {
     if (!this.alfineteDentro(f)) return;
     this.fonte.addFeature(f);
     this.selecionar(f); // abre o cartão para escolher tipo e nome
+    this.registrarPasso();
   }
 
   private alfineteDentro(f: Feature<Geometry>): boolean {
@@ -811,6 +829,74 @@ export class Mapa implements AfterViewInit, OnDestroy {
     this.modo.set('parado');
     this.select?.setActive(true);
     this.modify?.setActive(true);
+  }
+
+  // ---------- Voltar / Refazer ----------
+
+  /** Piquetes e alfinetes como texto (a cerca não muda, fica de fora). */
+  private foto(): string {
+    return this.fmt.writeFeatures(this.editaveis(), { decimals: 7 });
+  }
+
+  private editaveis(): Feature<Geometry>[] {
+    return this.fonte.getFeatures().filter((f) => f.get('feature_type') !== 'rural_property');
+  }
+
+  /** O primeiro passo é o mapa como abriu: dá para voltar até ele. */
+  private iniciarHistorico(): void {
+    this.historico = [this.foto()];
+    this.posicao = 0;
+    this.atualizarHistorico();
+  }
+
+  /** Fim de uma ação (fechar, arrastar, apagar, renomear…). Se nada mudou, não vira passo. */
+  private registrarPasso(): void {
+    if (!this.historico.length) return;
+    const agora = this.foto();
+    if (agora === this.historico[this.posicao]) return;
+    this.historico = this.historico.slice(0, this.posicao + 1); // ação nova descarta o "Refazer"
+    this.historico.push(agora);
+    if (this.historico.length > LIMITE_PASSOS + 1) this.historico.shift();
+    this.posicao = this.historico.length - 1;
+    this.atualizarHistorico();
+  }
+
+  protected voltar(): void {
+    this.irPara(this.posicao - 1, 'Voltei um passo.');
+  }
+
+  protected refazer(): void {
+    this.irPara(this.posicao + 1, 'Refiz o passo.');
+  }
+
+  /** Troca piquetes e alfinetes pela foto daquele passo; o salvar automático grava. */
+  private irPara(pos: number, mensagem: string): void {
+    if (pos < 0 || pos >= this.historico.length || this.modo() !== 'parado' || this.somenteLeitura()) return;
+    this.limparSelecao();
+    this.editaveis().forEach((f) => this.fonte.removeFeature(f));
+    this.fonte.addFeatures(this.fmt.readFeatures(this.historico[pos]) as Feature<Geometry>[]);
+    this.posicao = pos;
+    this.atualizarHistorico();
+    this.mostrarNota(mensagem);
+  }
+
+  private atualizarHistorico(): void {
+    this.podeVoltar.set(this.posicao > 0);
+    this.podeRefazer.set(this.posicao < this.historico.length - 1);
+  }
+
+  /** Ctrl/⌘+Z volta (desenhando: desfaz o último ponto); Ctrl/⌘+Shift+Z ou Ctrl+Y refaz. */
+  @HostListener('document:keydown', ['$event'])
+  protected atalhos(evt: KeyboardEvent): void {
+    if (!(evt.ctrlKey || evt.metaKey)) return;
+    const tecla = evt.key.toLowerCase();
+    if (tecla !== 'z' && tecla !== 'y') return;
+    const alvo = evt.target as HTMLElement | null;
+    if (alvo && (alvo.tagName === 'INPUT' || alvo.tagName === 'TEXTAREA' || alvo.tagName === 'SELECT')) return;
+    evt.preventDefault();
+    if (tecla === 'y' || evt.shiftKey) this.refazer();
+    else if (this.modo() === 'piquete') this.desfazerPonto();
+    else this.voltar();
   }
 
   // ---------- "Terminei" ----------
