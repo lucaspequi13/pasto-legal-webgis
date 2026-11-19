@@ -14,7 +14,7 @@ Serviço separado do Pasto Legal. Guarda os links e os rascunhos do mapa; o chat
 | `DELETE /internal/owners/{user_id}` | Pasto Legal | Pedido de exclusão (LGPD) |
 | `GET /health` | Deploy | Saúde |
 
-Rotas `/internal/*` exigem o header `X-Internal-Key`. O dono é guardado como HMAC do `user_id` (nunca o telefone).
+Rotas `/internal/*` exigem o header `X-Internal-Key`. Rotas do mapa (`/links/*`) têm limite por IP: 120 pedidos/min e 20 links inválidos/min (→ `429`); o IP fica só na memória, por 1 minuto. O dono é guardado como HMAC do `user_id` (nunca o telefone).
 Tarefas de fundo (a cada 60 s): 10 min sem editar → `enviado`; apaga links com mais de 30 dias.
 
 ## Rodar sem Docker (desenvolvimento)
@@ -32,6 +32,18 @@ cp .env.example .env            # preencha as chaves
 docker compose up -d            # Postgres local na porta 5433
 uv run --env-file .env uvicorn app.main:get_app --factory --reload --port 8100
 ```
+
+## Banco e migrações (Alembic)
+
+As tabelas vêm de `migrations/versions/` (SQL à mão), não do código da API.
+
+```bash
+cd webgis/api
+uv run --env-file .env alembic upgrade head              # aplica (o container faz isso ao subir)
+uv run --env-file .env alembic revision -m "descrição"   # nova migração
+```
+
+O `dev.py` e os testes aplicam as migrações sozinhos.
 
 ## Testes (Postgres embutido, sem Docker)
 

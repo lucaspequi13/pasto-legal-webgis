@@ -16,13 +16,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
 from .config import Settings
 from .db import Database
+from .ratelimit import RateLimiter
 from .rules import RuleError, check_draft, summarize
 from .security import new_token, owner_of, same_key, token_hash
 
@@ -34,6 +36,7 @@ MSG_REPLACED = "Este link foi substituído por um mais novo. Use o último link 
 MSG_NOT_FOUND = "Link inválido. Peça um novo link no WhatsApp."
 MSG_READ_ONLY = "Você já enviou as alterações. Peça um novo link no WhatsApp para continuar."
 MSG_STALE = "Este mapa foi alterado em outro lugar. Recarregue a página."
+MSG_TOO_MANY = "Muitas tentativas. Espere um minuto e tente de novo."
 
 
 def _now() -> datetime:
@@ -115,6 +118,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["Content-Type"],
     )
 
+    limiter = RateLimiter(settings.rate_limit_per_minute, settings.rate_limit_failures_per_minute)
+    app.state.limiter = limiter
+
+    @app.middleware("http")
+    async def rate_limit(request: Request, call_next):
+        """Limite por IP só nas rotas do mapa (/links/*); /internal/* usa a chave."""
+        if not request.url.path.startswith("/links/") or request.method == "OPTIONS":
+            return await call_next(request)
+        key = request.client.host if request.client else "?"
+        if not limiter.allow(key):
+            return JSONResponse({"detail": MSG_TOO_MANY}, status_code=429)
+        response = await call_next(request)
+        if response.status_code in (404, 410):
+            limiter.failed(key)
+        return response
+
     @app.middleware("http")
     async def referrer_policy(request, call_next):
         response = await call_next(request)
@@ -152,6 +171,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 for row in await asyncio.to_thread(finish_idle):
                     await _notify(row["id"])
                 await asyncio.to_thread(cleanup)
+                limiter.cleanup()
             except Exception as e:  # noqa: BLE001 - o loop não pode morrer
                 log.warning("housekeeping falhou: %s", e)
             await asyncio.sleep(60)

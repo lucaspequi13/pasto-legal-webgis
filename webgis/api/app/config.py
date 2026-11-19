@@ -38,6 +38,11 @@ class Settings:
     link_open_minutes: int = field(default_factory=lambda: _int("WEBGIS_LINK_OPEN_MINUTES", 5))
     idle_finish_minutes: int = field(default_factory=lambda: _int("WEBGIS_IDLE_FINISH_MINUTES", 10))
     retention_days: int = field(default_factory=lambda: _int("WEBGIS_RETENTION_DAYS", 30))
+    # Limite por IP nas rotas do mapa: pedidos por minuto e links inválidos por minuto.
+    rate_limit_per_minute: int = field(default_factory=lambda: _int("WEBGIS_RATE_LIMIT_PER_MINUTE", 120))
+    rate_limit_failures_per_minute: int = field(
+        default_factory=lambda: _int("WEBGIS_RATE_LIMIT_FAILURES_PER_MINUTE", 20)
+    )
     max_paddocks: int = field(default_factory=lambda: _int("WEBGIS_MAX_PADDOCKS", 200))
 
     def check(self) -> None:

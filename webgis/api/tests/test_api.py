@@ -164,3 +164,20 @@ def test_no_changes_means_nothing_to_confirm(client, snapshot):
     client.post(f"/links/{token}/finish")
     draft = client.get("/internal/drafts", params={"user_id": "5562999990000"}, headers=H).json()["draft"]
     assert draft is None
+
+
+def test_rate_limit_on_map_routes(database_url, snapshot):
+    from fastapi.testclient import TestClient
+
+    from app.config import Settings
+    from app.main import create_app
+
+    settings = Settings(database_url=database_url, internal_key=KEY, hmac_key="h",
+                        rate_limit_per_minute=5, rate_limit_failures_per_minute=3)
+    with TestClient(create_app(settings)) as c:
+        # Alguém tentando adivinhar tokens: depois de 3 links inválidos, bloqueia.
+        assert [c.get(f"/links/chute{i}").status_code for i in range(4)] == [404, 404, 404, 429]
+        assert "Muitas tentativas" in c.get("/links/qualquer").json()["detail"]
+        # As rotas internas (com a chave) não entram no limite.
+        r = c.post("/internal/links", json={"user_id": "1", "snapshot": snapshot}, headers=H)
+        assert r.status_code == 200
