@@ -33,6 +33,8 @@ class Settings:
             if o.strip()
         )
     )
+    # Só para desenvolvimento: aceita o front aberto pelo IP da rede local (teste no celular).
+    cors_origin_regex: str = field(default_factory=lambda: os.environ.get("WEBGIS_CORS_ORIGIN_REGEX", ""))
     link_open_minutes: int = field(default_factory=lambda: _int("WEBGIS_LINK_OPEN_MINUTES", 5))
     idle_finish_minutes: int = field(default_factory=lambda: _int("WEBGIS_IDLE_FINISH_MINUTES", 10))
     retention_days: int = field(default_factory=lambda: _int("WEBGIS_RETENTION_DAYS", 30))
