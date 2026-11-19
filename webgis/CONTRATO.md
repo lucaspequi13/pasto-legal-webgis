@@ -15,6 +15,8 @@ Enquanto o Pasto Legal não tem a integração, o **mock** faz o papel dele: `we
 
 ## Autenticação
 
+Endereço: em produção o WebGIS roda num container só, com a API em `/api` — ex.: `POST https://<domínio-do-webgis>/api/internal/links`. Em desenvolvimento a API fica direto em `http://localhost:8100`.
+
 Toda rota `/internal/*` (dos dois lados) usa o header `X-Internal-Key` com uma chave compartilhada (`WEBGIS_INTERNAL_KEY`). As rotas `/links/*` são do mapa e usam o token do link.
 
 ## Formatos

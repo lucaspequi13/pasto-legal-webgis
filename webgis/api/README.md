@@ -33,6 +33,20 @@ docker compose up -d            # Postgres local na porta 5433
 uv run --env-file .env uvicorn app.main:get_app --factory --reload --port 8100
 ```
 
+## Imagem única (produção)
+
+O `webgis/Dockerfile` gera **um container só**: o mapa pronto em `/` e esta API em `/api`
+(`app/servidor.py`). Não precisa de nginx nem de outro container.
+
+```bash
+docker build -t webgis -f webgis/Dockerfile webgis
+docker run --env-file webgis/api/.env -p 8100:8100 webgis    # abra http://localhost:8100
+```
+
+Em produção: `WEBGIS_PUBLIC_URL=https://<domínio>` e o Pasto Legal chama `https://<domínio>/api/internal/...`.
+O deploy segue o padrão do LAPIG (`.github/workflows/webgis-develop.yml`: imagem
+`lapig/app_pasto_legal_webgis:develop_<commit>` + `caretaker`). A porta 8100 fica atrás do proxy, não aberta direto.
+
 ## Banco e migrações (Alembic)
 
 As tabelas vêm de `migrations/versions/` (SQL à mão), não do código da API.

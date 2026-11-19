@@ -124,7 +124,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def rate_limit(request: Request, call_next):
         """Limite por IP só nas rotas do mapa (/links/*); /internal/* usa a chave."""
-        if not request.url.path.startswith("/links/") or request.method == "OPTIONS":
+        # Na imagem única a API fica em /api: compara o caminho sem esse prefixo.
+        path = request.url.path.removeprefix(request.scope.get("root_path", ""))
+        if not path.startswith("/links/") or request.method == "OPTIONS":
             return await call_next(request)
         key = request.client.host if request.client else "?"
         if not limiter.allow(key):

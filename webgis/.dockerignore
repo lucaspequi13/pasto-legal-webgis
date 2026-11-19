@@ -1,0 +1,9 @@
+frontend/node_modules
+frontend/dist
+frontend/.angular
+api/.venv
+api/.devdb
+api/.env
+api/.pytest_cache
+api/tests
+**/__pycache__

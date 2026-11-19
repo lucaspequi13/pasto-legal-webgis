@@ -61,6 +61,11 @@ cd webgis/api && uv run --group dev pytest -q       # API (Postgres embutido)
 cd webgis/frontend && npm run deploy:pages
 ```
 
+## Produção (imagem única)
+
+`webgis/Dockerfile` junta o mapa e a API num container só (mapa em `/`, API em `/api`) — detalhes em `api/README.md`.
+Push na `develop` do LAPIG mexendo em `webgis/` → `.github/workflows/webgis-develop.yml` gera a imagem e o `caretaker` reinicia.
+
 ## Próximos passos
 
-Integração no Pasto Legal seguindo o contrato · deploy no servidor do LAPIG (compose com API + front + `/api`, migrações, domínio na chave do MapTiler).
+Integração no Pasto Legal seguindo o contrato · no servidor: cadastrar `app_pasto_legal_webgis` no `caretaker` (variáveis do `.env`, banco), domínio + HTTPS e o domínio na chave do MapTiler.
