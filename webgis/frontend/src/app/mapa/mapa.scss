@@ -65,6 +65,18 @@ input, select { font: 14px system-ui, sans-serif; padding: 8px; border: 1px soli
 .travado.ok { background: #1b7a3a; }
 .travado .btn { margin-top: 10px; display: block; width: 100%; }
 
+.carregando {
+  position: absolute; inset: 0; z-index: 60; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 14px;
+  background: #1E2A26; color: #fff; font: 600 18px system-ui, sans-serif;
+}
+.girando {
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 4px solid rgba(255, 255, 255, 0.25); border-top-color: #C96A1B;
+  animation: girar 0.9s linear infinite;
+}
+@keyframes girar { to { transform: rotate(360deg); } }
+
 /* ---------- celular ---------- */
 @media (max-width: 640px), (pointer: coarse) {
   :host { height: 100dvh; font-size: 16px; }

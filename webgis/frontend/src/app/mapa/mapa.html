@@ -1,5 +1,12 @@
 <div #mapEl class="mapa"></div>
 
+@if (carregando()) {
+  <div class="carregando" role="status" aria-live="polite">
+    <div class="girando" aria-hidden="true"></div>
+    Abrindo sua fazenda…
+  </div>
+}
+
 @if (fazenda(); as faz) {
   <div class="topo">
     <strong>{{ faz.nome }}</strong> · {{ faz.areaHa }} ha

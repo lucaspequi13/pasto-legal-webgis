@@ -202,6 +202,8 @@ export class Mapa implements AfterViewInit, OnDestroy {
   /** Mapa só leitura: link terminado, expirado ou substituído. */
   protected readonly somenteLeitura = signal<string | null>(null);
   protected readonly enviado = signal(false);
+  /** Tela "Abrindo sua fazenda…" até o mapa chegar (no 4G lento leva alguns segundos). */
+  protected readonly carregando = signal(true);
 
   ngAfterViewInit(): void {
     this.map = new OlMap({
@@ -213,8 +215,8 @@ export class Mapa implements AfterViewInit, OnDestroy {
     window.addEventListener('hashchange', () => window.location.reload());
     this.carregarSatelite();
     this.ativarEdicao();
-    if (this.token) this.carregarDaApi(this.token);
-    else this.carregarFazenda();
+    const carregar = this.token ? this.carregarDaApi(this.token) : this.carregarFazenda();
+    carregar.finally(() => this.carregando.set(false));
   }
 
   ngOnDestroy(): void {
