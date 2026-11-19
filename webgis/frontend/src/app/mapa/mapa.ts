@@ -774,7 +774,7 @@ export class Mapa implements AfterViewInit, OnDestroy {
     } catch {
       /* navegador sem armazenamento: só não lembra a escolha */
     }
-    this.mostrarNota(ligado ? 'Grudar ligado: o traço encosta na cerca e nos vizinhos.' : 'Grudar desligado: dá para deixar espaço (corredor) entre piquetes.');
+    this.mostrarNota(ligado ? 'Grudar Piquetes ligado: o traço encosta na cerca e nos vizinhos.' : 'Grudar Piquetes desligado: dá para deixar espaço (corredor) entre piquetes.');
   }
 
   /** Aviso no topo: "Grudou no Piquete 2" (some sozinho). */
@@ -782,7 +782,7 @@ export class Mapa implements AfterViewInit, OnDestroy {
     if (!this.grudouEm.size) return;
     const onde = [...this.grudouEm].join(' e ');
     this.grudouEm.clear();
-    this.mostrarNota(`🧲 Grudou ${onde}. Para deixar espaço, desligue o Grudar.`);
+    this.mostrarNota(`Grudou ${onde}. Para deixar espaço, desligue Grudar Piquetes.`);
   }
 
   /** Liga/desliga o zoom do toque duplo (atrapalha fechar o piquete no celular). */

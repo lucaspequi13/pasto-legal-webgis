@@ -43,7 +43,7 @@
       <button type="button" class="btn" (click)="iniciarAlfinete()">+ Alfinete</button>
       <button type="button" class="btn concluir" (click)="terminei()">Terminei</button>
       <button type="button" class="btn ima" [class.desligado]="!ima()" (click)="alternarIma()"
-              [attr.aria-pressed]="ima()">🧲 Grudar: {{ ima() ? 'ligado' : 'desligado' }}</button>
+              role="switch" [attr.aria-checked]="ima()"><span class="chave" aria-hidden="true"></span>Grudar Piquetes</button>
     }
     @case ('piquete') {
       @if (toque) {
@@ -54,7 +54,7 @@
         <button type="button" class="btn concluir" (click)="fecharPiquete()">✓ Fechar piquete</button>
       }
       <button type="button" class="btn ima" [class.desligado]="!ima()" (click)="alternarIma()"
-              [attr.aria-pressed]="ima()">🧲 {{ ima() ? 'ligado' : 'desligado' }}</button>
+              role="switch" [attr.aria-checked]="ima()"><span class="chave" aria-hidden="true"></span>Grudar Piquetes</button>
       <button type="button" class="btn" (click)="cancelarDesenho()">Cancelar</button>
     }
     @case ('alfinete') {
