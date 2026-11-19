@@ -7,7 +7,17 @@
  * Funções puras com Turf.js: sem OpenLayers e sem Angular, para testar e levar para a API depois.
  */
 import type { Feature, MultiPolygon, Point, Polygon } from 'geojson';
-import { area, booleanPointInPolygon, difference, featureCollection, intersect, polygon } from '@turf/turf';
+import {
+  area,
+  booleanPointInPolygon,
+  difference,
+  featureCollection,
+  intersect,
+  kinks,
+  polygon,
+  union,
+  unkinkPolygon,
+} from '@turf/turf';
 
 export type Poligono = Feature<Polygon | MultiPolygon>;
 
@@ -39,19 +49,32 @@ export function partes(p: Poligono): Poligono[] {
   return lista.filter((x) => area(x) >= AREA_MINIMA_M2).sort((a, b) => area(b) - area(a));
 }
 
+/**
+ * Traço que cruza a si mesmo (estrela, "gravata") tem área quase zero para o Turf,
+ * e aí a regra da cerca erra feio. Aqui ele é desfeito nas partes reais e unido de novo.
+ * Polígono normal volta igual.
+ */
+export function consertar(p: Poligono): Poligono {
+  if (p.geometry.type !== 'Polygon' || kinks(p as Feature<Polygon>).features.length === 0) return p;
+  const pedacos = unkinkPolygon(p as Feature<Polygon>);
+  return (union(pedacos) as Poligono | null) ?? p;
+}
+
 export type ResultadoCerca =
   | { tipo: 'ok'; geom: Poligono; ajustado: boolean }
   | { tipo: 'recusado'; fracaoFora: number };
 
 /** Aplica a regra da cerca a um piquete desenhado ou editado. */
-export function aplicarCerca(piquete: Poligono, cerca: Poligono): ResultadoCerca {
+export function aplicarCerca(original: Poligono, cerca: Poligono): ResultadoCerca {
+  const piquete = consertar(original);
   const total = area(piquete);
   const dentro = interseccao(piquete, cerca);
   if (!dentro) return { tipo: 'recusado', fracaoFora: 1 };
   const fora = Math.max(0, 1 - area(dentro) / total);
   if (fora >= LIMITE_FORA) return { tipo: 'recusado', fracaoFora: fora };
   const ajustado = fora > 0.0005; // > 0,05%: houve corte de verdade
-  return { tipo: 'ok', geom: ajustado ? dentro : piquete, ajustado };
+  // Traço consertado também conta como ajustado, para o mapa redesenhar a forma real.
+  return { tipo: 'ok', geom: ajustado ? dentro : piquete, ajustado: ajustado || piquete !== original };
 }
 
 /** Alfinete precisa estar dentro da fazenda. */

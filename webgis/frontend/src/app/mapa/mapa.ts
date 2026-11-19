@@ -18,7 +18,7 @@ import Modify from 'ol/interaction/Modify';
 import { click } from 'ol/events/condition';
 import type { Feature as GjFeature, Geometry as GjGeometry, Point as GjPoint } from 'geojson';
 import { environment } from '../../environments/environment';
-import { Poligono, aplicarCerca, areaHa, diferenca, interseccao, partes, pontoDentro } from './regras';
+import { Poligono, aplicarCerca, areaHa, consertar, diferenca, interseccao, partes, pontoDentro } from './regras';
 import { AlfineteApi, ErroApi, LinkApi, PiqueteApi, api, tokenDaUrl } from './api';
 
 // IDs do satélite no MapTiler, do mais novo para o mais antigo; usa o primeiro que existir.
@@ -470,8 +470,9 @@ export class Mapa implements AfterViewInit, OnDestroy {
         return false;
       }
       if (r.ajustado) {
+        const cortou = areaHa(r.geom) < areaHa(consertar(this.poly(f))) - 1e-6;
         f.setGeometry(this.geom(r.geom));
-        mensagens.push('Uma parte passou da cerca e voltou para o limite.');
+        if (cortou) mensagens.push('Uma parte passou da cerca e voltou para o limite.');
       }
     }
 
