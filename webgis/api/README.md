@@ -17,7 +17,14 @@ Serviço separado do Pasto Legal. Guarda os links e os rascunhos do mapa; o chat
 Rotas `/internal/*` exigem o header `X-Internal-Key`. O dono é guardado como HMAC do `user_id` (nunca o telefone).
 Tarefas de fundo (a cada 60 s): 10 min sem editar → `enviado`; apaga links com mais de 30 dias.
 
-## Rodar
+## Rodar sem Docker (desenvolvimento)
+
+```bash
+cd webgis/api
+uv run --group dev python dev.py      # API em :8100 com Postgres embutido; chave interna = dev
+```
+
+## Rodar com Docker
 
 ```bash
 cd webgis/api
