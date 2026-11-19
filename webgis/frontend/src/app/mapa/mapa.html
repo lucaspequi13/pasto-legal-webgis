@@ -1,10 +1,28 @@
 <div #mapEl class="mapa"></div>
 
 @if (fazenda(); as faz) {
-  <div class="topo"><strong>{{ faz.nome }}</strong> · {{ faz.areaHa }} ha</div>
+  <div class="topo">
+    <strong>{{ faz.nome }}</strong> · {{ faz.areaHa }} ha
+    @if (comApi && !somenteLeitura()) {
+      <span class="estado" [class]="'estado ' + salvar()">
+        @switch (salvar()) {
+          @case ('salvo') { ✓ salvo }
+          @case ('salvando') { salvando… }
+          @case ('pendente') { salvando… }
+          @case ('offline') { sem internet: não salvo }
+          @case ('erro') { não salvo }
+        }
+      </span>
+    }
+  </div>
+}
+
+@if (somenteLeitura(); as msg) {
+  <div class="travado" [class.ok]="enviado()">{{ msg }}</div>
 }
 
 <!-- Barra de ações -->
+@if (!somenteLeitura()) {
 <div class="barra">
   @switch (modo()) {
     @case ('parado') {
@@ -23,6 +41,7 @@
     }
   }
 </div>
+}
 
 <!-- Cartão do item selecionado -->
 @if (selecionado(); as sel) {

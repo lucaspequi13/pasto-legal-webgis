@@ -16,14 +16,18 @@ import Snap from 'ol/interaction/Snap';
 import Select from 'ol/interaction/Select';
 import Modify from 'ol/interaction/Modify';
 import { click } from 'ol/events/condition';
-import type { Feature as GjFeature, Point as GjPoint } from 'geojson';
+import type { Feature as GjFeature, Geometry as GjGeometry, Point as GjPoint } from 'geojson';
 import { environment } from '../../environments/environment';
 import { Poligono, aplicarCerca, areaHa, diferenca, interseccao, partes, pontoDentro } from './regras';
+import { AlfineteApi, ErroApi, LinkApi, PiqueteApi, api, tokenDaUrl } from './api';
 
 // IDs do satélite no MapTiler, do mais novo para o mais antigo; usa o primeiro que existir.
 const SATELITE_IDS = ['satellite-v2', 'satellite-v4', 'satellite'];
-// Fazenda de teste exportada do Pasto Legal (dev) — ver webgis/scripts/exportar_fazenda.py
+// Fazenda de teste exportada do Pasto Legal (dev) — ver webgis/scripts/exportar_fazenda.py.
+// Só é usada no modo demonstração (sem #t= na URL), como na demo do GitHub Pages.
 const FAZENDA_URL = 'fazenda-teste.geojson';
+/** Espera depois da última edição antes de salvar (salvar automático). */
+const ESPERA_SALVAR_MS = 1000;
 /** Nome automático que o cadastro por arquivo gera hoje (ex.: "Paddock_3"). */
 const NOME_PADRAO_ARQUIVO = /^Paddock_(\d+)$/;
 
@@ -116,6 +120,8 @@ interface InfoSelecionado {
   pinType?: TipoAlfinete;
 }
 
+type EstadoSalvar = 'salvo' | 'salvando' | 'pendente' | 'erro' | 'offline';
+
 interface Resumo {
   novos: string[];
   alterados: string[];
@@ -144,8 +150,6 @@ export class Mapa implements AfterViewInit, OnDestroy {
   private draw?: Draw;
   private snapDesenho?: Snap;
 
-  /** Maior número de piquete já usado nesta fazenda (nunca é reaproveitado). */
-  private ultimoNumero = 0;
   /** Como a fazenda chegou do chat, para montar o resumo do "Terminei". */
   private inicial = new Map<string, { rotulo: string; geom: string }>();
 
@@ -157,6 +161,19 @@ export class Mapa implements AfterViewInit, OnDestroy {
   protected readonly resumo = signal<Resumo | null>(null);
   private notaTimer?: ReturnType<typeof setTimeout>;
 
+  /** Token do link (#t=...). Sem token = modo demonstração, sem API. */
+  private readonly token = tokenDaUrl();
+  protected readonly comApi = this.token !== null;
+  /** Versão do rascunho no servidor; cada salvamento soma 1. */
+  private versao = 0;
+  private salvarTimer?: ReturnType<typeof setTimeout>;
+  /** true enquanto aplicamos no mapa a geometria corrigida pelo servidor (não dispara novo salvar). */
+  private aplicandoServidor = false;
+  protected readonly salvar = signal<EstadoSalvar>('salvo');
+  /** Mapa só leitura: link terminado, expirado ou substituído. */
+  protected readonly somenteLeitura = signal<string | null>(null);
+  protected readonly enviado = signal(false);
+
   ngAfterViewInit(): void {
     this.map = new OlMap({
       target: this.mapEl.nativeElement,
@@ -164,12 +181,14 @@ export class Mapa implements AfterViewInit, OnDestroy {
       view: new View({ center: fromLonLat([-49.25, -16.68]), zoom: 14 }),
     });
     this.carregarSatelite();
-    this.carregarFazenda();
     this.ativarEdicao();
+    if (this.token) this.carregarDaApi(this.token);
+    else this.carregarFazenda();
   }
 
   ngOnDestroy(): void {
     clearTimeout(this.notaTimer);
+    clearTimeout(this.salvarTimer);
     this.map?.setTarget(undefined);
   }
 
@@ -225,6 +244,143 @@ export class Mapa implements AfterViewInit, OnDestroy {
     }
   }
 
+  // ---------- API: abrir o link e salvar automático ----------
+
+  private async carregarDaApi(token: string): Promise<void> {
+    let link: LinkApi;
+    try {
+      link = await api.abrir(token);
+    } catch (e) {
+      this.travar(e instanceof ErroApi ? e.message : String(e));
+      return;
+    }
+    this.versao = link.version;
+
+    const cerca = new Feature<Geometry>(this.lerGeom(link.farm.geometry));
+    cerca.setProperties({ feature_type: 'rural_property', feature_id: link.farm.id, name: link.farm.name });
+    const features: Feature<Geometry>[] = [cerca];
+    for (const p of link.paddocks) {
+      const f = new Feature<Geometry>(this.lerGeom(p.geometry));
+      f.setProperties({ feature_type: 'paddock', display_number: p.number, name: p.name ?? undefined });
+      if (p.id) f.setId(p.id);
+      features.push(f);
+    }
+    for (const a of link.pins) {
+      const f = new Feature<Geometry>(this.lerGeom({ type: 'Point', coordinates: [a.lon, a.lat] }));
+      f.setProperties({ feature_type: 'pin', pin_type: a.kind, name: a.name ?? undefined });
+      if (a.id) f.setId(a.id);
+      features.push(f);
+    }
+    this.fonte.addFeatures(features);
+    for (const f of features) {
+      if (f.get('feature_type') === 'rural_property' || f.getId() === undefined) continue;
+      this.inicial.set(String(f.getId()), { rotulo: rotulo(f), geom: this.geomTexto(f) });
+    }
+    this.fazenda.set({
+      nome: nomeFazenda(cerca),
+      areaHa: areaHa(this.poly(cerca)).toLocaleString('pt-BR', { maximumFractionDigits: 0 }),
+    });
+    const extent = this.fonte.getExtent();
+    if (extent) this.map?.getView().fit(extent, { padding: [60, 60, 120, 60], maxZoom: 18 });
+
+    if (link.read_only) {
+      this.travar(link.message ?? 'Este mapa está só para leitura.');
+      return;
+    }
+    // A partir daqui, toda mudança no mapa agenda um salvamento.
+    this.fonte.on(['addfeature', 'removefeature', 'changefeature'], () => this.agendarSalvar());
+    window.addEventListener('offline', () => this.salvar.set('offline'));
+    window.addEventListener('online', () => this.agendarSalvar());
+  }
+
+  private agendarSalvar(): void {
+    if (!this.token || this.aplicandoServidor || this.somenteLeitura()) return;
+    this.salvar.set(navigator.onLine ? 'pendente' : 'offline');
+    clearTimeout(this.salvarTimer);
+    this.salvarTimer = setTimeout(() => this.salvarAgora(), ESPERA_SALVAR_MS);
+  }
+
+  /** Piquetes e alfinetes do mapa no formato da API. */
+  private conteudo(): { paddocks: PiqueteApi[]; pins: AlfineteApi[] } {
+    const paddocks: PiqueteApi[] = [];
+    const pins: AlfineteApi[] = [];
+    for (const f of this.fonte.getFeatures()) {
+      const tipo = f.get('feature_type');
+      const id = f.getId() === undefined ? null : String(f.getId());
+      const g = f.getGeometry();
+      if (!g) continue;
+      const geometry = this.fmt.writeGeometryObject(g, { decimals: 7 });
+      if (tipo === 'paddock') {
+        paddocks.push({ id, number: f.get('display_number'), name: f.get('name') ?? null, geometry });
+      } else if (tipo === 'pin' && geometry.type === 'Point') {
+        const [lon, lat] = geometry.coordinates;
+        pins.push({ id, kind: f.get('pin_type') ?? 'bebedouro', name: f.get('name') ?? null, lon, lat });
+      }
+    }
+    return { paddocks, pins };
+  }
+
+  private async salvarAgora(): Promise<boolean> {
+    if (!this.token || this.somenteLeitura()) return false;
+    if (!navigator.onLine) {
+      this.salvar.set('offline');
+      return false;
+    }
+    clearTimeout(this.salvarTimer);
+    this.salvar.set('salvando');
+    try {
+      const r = await api.salvar(this.token, { version: this.versao, ...this.conteudo() });
+      this.versao = r.version;
+      this.aplicarCorrecoes(r.paddocks);
+      this.salvar.set('salvo');
+      return true;
+    } catch (e) {
+      const erro = e instanceof ErroApi ? e : new ErroApi(0, String(e));
+      if (erro.status === 409 || erro.status === 410 || erro.status === 404) this.travar(erro.message);
+      else {
+        this.salvar.set(erro.status === 0 ? 'offline' : 'erro');
+        this.mostrarNota(erro.message);
+      }
+      return false;
+    }
+  }
+
+  /** O servidor manda: se ele corrigiu um piquete (ex.: cortou na cerca), o mapa redesenha. */
+  private aplicarCorrecoes(paddocks: PiqueteApi[]): void {
+    const porNumero = new Map(paddocks.map((p) => [p.number, p]));
+    this.aplicandoServidor = true;
+    try {
+      for (const f of this.piquetes()) {
+        const p = porNumero.get(f.get('display_number'));
+        const g = f.getGeometry();
+        if (!p || !g) continue;
+        const nova = this.fmt.writeGeometry(this.lerGeom(p.geometry), { decimals: 7 });
+        if (nova !== this.fmt.writeGeometry(g, { decimals: 7 })) f.setGeometry(this.lerGeom(p.geometry));
+      }
+    } finally {
+      this.aplicandoServidor = false;
+    }
+  }
+
+  /** Para tudo e deixa o mapa só para leitura, com a mensagem na tela. */
+  private travar(mensagem: string): void {
+    clearTimeout(this.salvarTimer);
+    this.cancelarDesenho();
+    this.limparSelecao();
+    this.select?.setActive(false);
+    this.modify?.setActive(false);
+    this.somenteLeitura.set(mensagem);
+  }
+
+  /** Aviso do navegador ao sair com alteração ainda não salva. */
+  @HostListener('window:beforeunload', ['$event'])
+  protected antesDeSair(evt: BeforeUnloadEvent): void {
+    const s = this.salvar();
+    if (this.comApi && !this.somenteLeitura() && (s === 'pendente' || s === 'salvando' || s === 'offline' || s === 'erro')) {
+      evt.preventDefault();
+    }
+  }
+
   /**
    * "Piquete n" por ordem de inserção, contado por fazenda (regra do líder, 06/11).
    * "Paddock_3" (nome automático do cadastro por arquivo) vira número 3; outro nome é nome próprio
@@ -238,17 +394,22 @@ export class Mapa implements AfterViewInit, OnDestroy {
       const m = NOME_PADRAO_ARQUIVO.exec(id);
       if (m) {
         f.set('display_number', Number(m[1]));
-        this.ultimoNumero = Math.max(this.ultimoNumero, Number(m[1]));
       } else {
         if (id) f.set('name', id);
         semNumero.push(f);
       }
     }
-    for (const f of semNumero) f.set('display_number', this.proximoNumero());
+    let maior = Math.max(0, ...features.map((f) => Number(f.get('display_number')) || 0));
+    for (const f of semNumero) f.set('display_number', ++maior);
   }
 
+  /**
+   * Próximo número = maior número existente + 1 (decisão de 19/11): buracos não são
+   * preenchidos (1,2,3,4 apaga 3 → 5); se apagar o último, ele volta (1,2,3 apaga 3 → 3).
+   */
   private proximoNumero(): number {
-    return ++this.ultimoNumero;
+    const numeros = this.piquetes().map((f) => Number(f.get('display_number')) || 0);
+    return Math.max(0, ...numeros) + 1;
   }
 
   // ---------- conversões ----------
@@ -261,6 +422,12 @@ export class Mapa implements AfterViewInit, OnDestroy {
     const g = this.fmt.readGeometry(p.geometry);
     if (!g) throw new Error('Geometria inválida');
     return g;
+  }
+
+  private lerGeom(g: GjGeometry): Geometry {
+    const geo = this.fmt.readGeometry(g);
+    if (!geo) throw new Error('Geometria inválida');
+    return geo;
   }
 
   private geomTexto(f: Feature<Geometry>): string {
@@ -431,6 +598,7 @@ export class Mapa implements AfterViewInit, OnDestroy {
     if (!f) return;
     f.set('name', valor.trim() || undefined); // vazio volta para o nome padrão
     this.atualizarCartao();
+    this.agendarSalvar();
   }
 
   protected mudarTipoAlfinete(valor: string): void {
@@ -438,6 +606,7 @@ export class Mapa implements AfterViewInit, OnDestroy {
     if (!f) return;
     f.set('pin_type', valor === 'outro' ? 'outro' : 'bebedouro');
     this.atualizarCartao();
+    this.agendarSalvar();
   }
 
   protected apagarSelecionado(): void {
@@ -459,7 +628,7 @@ export class Mapa implements AfterViewInit, OnDestroy {
   }
 
   private iniciarDesenho(tipo: 'piquete' | 'alfinete'): void {
-    if (!this.map || this.modo() !== 'parado') return;
+    if (!this.map || this.modo() !== 'parado' || this.somenteLeitura()) return;
     this.limparSelecao();
     this.select?.setActive(false);
     this.modify?.setActive(false);
@@ -482,8 +651,7 @@ export class Mapa implements AfterViewInit, OnDestroy {
     f.set('display_number', this.proximoNumero());
     this.fonte.addFeature(f);
     if (!this.aplicarRegras(f)) {
-      this.fonte.removeFeature(f);
-      this.ultimoNumero--; // recusado: o número volta a ficar livre
+      this.fonte.removeFeature(f); // recusado: o número volta a ficar livre
       return;
     }
     if (this.fonte.hasFeature(f)) this.selecionar(f);
@@ -541,7 +709,11 @@ export class Mapa implements AfterViewInit, OnDestroy {
 
   // ---------- "Terminei" ----------
 
-  protected terminei(): void {
+  protected async terminei(): Promise<void> {
+    if (this.token) {
+      await this.terminarNaApi(this.token);
+      return;
+    }
     this.cancelarDesenho();
     this.limparSelecao();
     const atuais = this.fonte.getFeatures().filter((f) => f.get('feature_type') !== 'rural_property');
@@ -577,6 +749,27 @@ export class Mapa implements AfterViewInit, OnDestroy {
       }),
     };
     this.resumo.set({ novos, alterados, apagados, alfinetes, geojson: JSON.stringify(saida, null, 2) });
+  }
+
+  /** "Terminei" com link: salva o que faltar, avisa a API e trava o mapa. */
+  private async terminarNaApi(token: string): Promise<void> {
+    this.cancelarDesenho();
+    this.limparSelecao();
+    if (this.salvar() !== 'salvo' && !(await this.salvarAgora())) {
+      this.mostrarNota('Não consegui salvar as últimas alterações. Confira a internet e tente de novo.');
+      return;
+    }
+    try {
+      const r = await api.terminar(token);
+      this.enviado.set(true);
+      this.travar(
+        r.notified
+          ? 'Pronto! Suas alterações foram enviadas. Confira no WhatsApp para confirmar.'
+          : 'Pronto! Volte ao WhatsApp e mande um oi para confirmar as alterações.',
+      );
+    } catch (e) {
+      this.mostrarNota(e instanceof ErroApi ? e.message : String(e));
+    }
   }
 
   protected fecharResumo(): void {
